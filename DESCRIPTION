@@ -19,7 +19,8 @@ Imports:
     jsonlite,
     magrittr,
     rlang,
-    stats
+    stats,
+    utils
 Suggests: 
     knitr,
     microbenchmark,
