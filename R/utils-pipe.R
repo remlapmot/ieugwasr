@@ -22,4 +22,5 @@ NULL
 #' @importFrom rlang .data
 NULL
 
+#' @importFrom utils globalVariables
 utils::globalVariables(c("."))
