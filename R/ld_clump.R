@@ -150,7 +150,6 @@ ld_clump_local <- function(dat, clump_kb, clump_r2, clump_p, bfile, plink_bin)
 	shell <- ifelse(Sys.info()['sysname'] == "Windows", "cmd", "sh")
 	fn <- tempfile()
 	write.table(data.frame(SNP=dat[["rsid"]], P=dat[["pval"]]), file=fn, row.names=FALSE, col.names=TRUE, quote=FALSE)
-
 	fun2 <- paste0(
 		shQuote(plink_bin, type=shell),
 		" --bfile ", shQuote(bfile, type=shell),
