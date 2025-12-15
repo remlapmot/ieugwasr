@@ -66,7 +66,7 @@ ld_clump(
 - ...:
 
   Additional arguments passed to
-  [`ld_clump_local()`](https://mrcieu.github.io/ieugwasr/dev/reference/ld_clump_local.md).
+  [`ld_clump_api()`](https://mrcieu.github.io/ieugwasr/dev/reference/ld_clump_api.md).
 
 ## Value
 

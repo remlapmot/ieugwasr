@@ -6,6 +6,8 @@
   before R 4.1 due to the new testthat requirements
 - Tweak an API test
 - Bump version of roxygen2
+- Fix a typo in the documentation for
+  [`ld_clump()`](https://mrcieu.github.io/ieugwasr/dev/reference/ld_clump.md)
 
 ## ieugwasr 1.1.0
 
