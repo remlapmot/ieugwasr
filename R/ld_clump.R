@@ -32,7 +32,7 @@
 #' @param plink_bin If `NULL` and `bfile` is not `NULL` then will detect 
 #' packaged plink binary for specific OS. Otherwise specify path to plink binary. 
 #' Default = `NULL`,
-#' @param ... Additional arguments passed to `ld_clump_local()`.
+#' @param ... Additional arguments passed to [`ld_clump_api()`].
 #'
 #' @export
 #' @return Data frame
