@@ -372,7 +372,7 @@ associations <- function(variants, id, proxies=1, r2=0.8, align_alleles=1, palin
 	{
 		return(out)
 	} else if(is.data.frame(out)) {
-		return(out %>% dplyr::as_tibble() %>% fix_n())
+		return(out %>% dplyr::as_tibble() %>% fix_n() %>% fix_ukb_e_associations())
 	} else {
 		return(dplyr::tibble())
 	}
@@ -408,6 +408,28 @@ fill_n <- function(d, opengwas_jwt=get_opengwas_jwt(), ...)
 		}
 	}
 	return(d)	
+}
+
+# TEMPORARY: remove once the OpenGWAS server is fixed.
+# For ukb-e datasets the /associations endpoint currently returns beta and eaf
+# for the other allele (i.e. -beta and 1 - eaf), whereas /tophits and /phewas
+# return the correct values. Correct them here, in associations() only.
+fix_ukb_e_associations <- function(d)
+{
+	if(!"id" %in% names(d))
+	{
+		return(d)
+	}
+	index <- startsWith(as.character(d[["id"]]), "ukb-e-")
+	if("beta" %in% names(d))
+	{
+		d[["beta"]][index] <- d[["beta"]][index] * -1
+	}
+	if("eaf" %in% names(d))
+	{
+		d[["eaf"]][index] <- 1 - d[["eaf"]][index]
+	}
+	return(d)
 }
 
 fix_n <- function(d)

@@ -3,6 +3,7 @@
 * `associations()` now returns the processed tibble. Previously its `... %>% return()` inside a pipe did not return from the function (since magrittr 2.0), so the raw server data frame was returned instead, with `n` as character.
 * Remove the flipping of `beta` for `ukb-e` datasets in `associations()`, `tophits()` and `phewas()`. The flip was never applied in `associations()` (see above), and the OpenGWAS server is the right place to correct these datasets.
 * Replace `%>% return()` with explicit `return()` calls throughout.
+* Temporarily correct `beta` and `eaf` for `ukb-e` datasets in `associations()`, because the OpenGWAS `/associations` endpoint currently returns them for the other allele. This will be removed once the server data are fixed.
 * Update some GitHub Actions workflows, including no longer testing on R before R 4.1 due to the new testthat requirements
 * Tweak an API test
 * Bump version of roxygen2
