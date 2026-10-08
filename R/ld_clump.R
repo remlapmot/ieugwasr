@@ -18,8 +18,17 @@
 #' the LD reference panels to perform clumping locally, see 
 #' [`ld_clump()`] and related vignettes for details.
 #'
+#' p-values smaller than about 1e-308 cannot be represented in R and underflow 
+#' to 0, and other software may cap small p-values (e.g. at 1e-200), so several 
+#' variants can share the smallest p-value. The lead variant among them would 
+#' then be chosen arbitrarily. If `dat` has `beta` and `se` columns, tied 
+#' p-values are broken by |`beta`/`se`| before clumping, so that the variant 
+#' with the strongest association is retained. The returned rows are unchanged. 
+#' Otherwise a warning is given if the smallest p-value is tied.
+#'
 #' @param dat Dataframe. Must have a variant name column (`rsid`) and pval column called `pval`. 
-#' If `id` is present then clumping will be done per unique id.
+#' If `id` is present then clumping will be done per unique id. 
+#' If `beta` and `se` are present they are used to break ties in `pval`.
 #' @param clump_kb Clumping kb window. Default is very strict, `10000`
 #' @param clump_r2 Clumping r2 threshold. Default is very strict, `0.001`
 #' @param clump_p Clumping sig level for index variants. Default = `1` (i.e. no threshold)
@@ -83,15 +92,18 @@ ld_clump <- function(dat=NULL, clump_kb=10000, clump_r2=0.001, clump_p=0.99,
 			message("Only one SNP for ", ids[i])
 			res[[i]] <- x
 		} else {
-			warn_tied_pval(x[["pval"]], clump_p, ids[i])
+			# Clump using p-values with ties broken, but return the original rows
+			x2 <- x
+			x2[["pval"]] <- break_pval_ties(x, clump_p, ids[i])
 			if(is.null(bfile))
 			{
 			  message("Clumping ", ids[i], ", ", nrow(x), " variants, using ", pop, " population reference")
-			  res[[i]] <- ld_clump_api(x, clump_kb=clump_kb, clump_r2=clump_r2, clump_p=clump_p, pop=pop, opengwas_jwt=opengwas_jwt, ...)
+			  clumped <- ld_clump_api(x2, clump_kb=clump_kb, clump_r2=clump_r2, clump_p=clump_p, pop=pop, opengwas_jwt=opengwas_jwt, ...)
 			} else {
 			  message("Clumping ", ids[i], ", ", nrow(x), " variants, using: ", bfile)
-				res[[i]] <- ld_clump_local(x, clump_kb=clump_kb, clump_r2=clump_r2, clump_p=clump_p, bfile=bfile, plink_bin=plink_bin, tmpdir=tmpdir)
+				clumped <- ld_clump_local(x2, clump_kb=clump_kb, clump_r2=clump_r2, clump_p=clump_p, bfile=bfile, plink_bin=plink_bin, tmpdir=tmpdir)
 			}
+			res[[i]] <- subset(x, x[["rsid"]] %in% clumped[["rsid"]])
 		}
 	}
 	res <- dplyr::bind_rows(res)
@@ -194,23 +206,57 @@ ld_clump_local <- function(dat, clump_kb, clump_r2, clump_p, bfile, plink_bin, t
 	return(subset(dat, dat[["rsid"]] %in% res[["SNP"]]))
 }
 
-# Warn if the smallest p-value is shared by several variants, e.g. because of
-# numerical underflow or p-values capped by other software, since plink then
-# chooses the lead variant among them arbitrarily (#39)
-warn_tied_pval <- function(pval, clump_p, id)
+# p-values smaller than R can represent underflow to 0, and other software may
+# cap them (e.g. at 1e-200), so several variants can share the smallest
+# p-value and plink would choose the lead variant among them arbitrarily (#39).
+# If beta and se are available, return p-values in which tied values at or
+# below clump_p are spread out so that the variant with the largest |beta/se|
+# has the smallest p-value. The new values keep the order of the distinct
+# p-values and stay at or below clump_p. Warn if the variant with the
+# smallest p-value cannot be determined.
+break_pval_ties <- function(dat, clump_p, id)
 {
-	if(all(is.na(pval))) return(invisible())
-	p <- min(pval, na.rm=TRUE)
-	n <- sum(pval == p, na.rm=TRUE)
-	if(n > 1 && p <= clump_p)
+	p <- dat[["pval"]]
+	if(all(c("beta", "se") %in% names(dat))) {
+		z <- abs(dat[["beta"]] / dat[["se"]])
+	} else {
+		z <- rep(NA_real_, length(p))
+	}
+	ok <- !is.na(p)
+	if(!any(ok)) return(p)
+
+	pmin <- min(p[ok])
+	tied <- which(ok & p == pmin)
+	# The lead is arbitrary unless one variant has the largest |beta/se|
+	ztied <- z[tied][!is.na(z[tied])]
+	if(length(tied) > 1 && pmin <= clump_p && (length(ztied) == 0 || sum(ztied == max(ztied)) > 1))
 	{
 		warning(
-			n, " variants for ", id, " share the smallest p-value (", format(p), "), ",
+			length(tied), " variants for ", id, " share the smallest p-value (", format(pmin), "), ",
 			"e.g. because of numerical underflow or p-values capped by other software. ",
-			"The lead variant among them will be chosen arbitrarily, not by strength of association."
+			"The lead variant among them will be chosen arbitrarily, not by strength of association",
+			if(all(is.na(z))) ". Include beta and se columns to break ties using |beta/se|." else
+				", because the largest |beta/se| among them is also tied."
 		)
 	}
-	invisible()
+	if(all(is.na(z))) return(p)
+
+	# Give tied 0s room to be spread out below the smallest positive p-value
+	if(sum(ok & p == 0) > 1)
+	{
+		p[ok & p == 0] <- min(c(p[ok & p > 0], clump_p)) / 2
+	}
+	p0 <- p
+	vals <- sort(unique(p0[ok]))
+	for(j in seq_along(vals))
+	{
+		idx <- which(ok & p0 == vals[j])
+		if(length(idx) < 2 || vals[j] > clump_p) next
+		lower <- if(j == 1) 0 else vals[j - 1]
+		idx <- idx[order(-z[idx], na.last=TRUE)]
+		p[idx] <- lower + (vals[j] - lower) * seq_along(idx) / length(idx)
+	}
+	return(p)
 }
 
 random_string <- function(n=1, len=6)

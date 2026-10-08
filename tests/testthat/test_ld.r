@@ -60,3 +60,16 @@ test_that("ld_reflookup", {
 	if (inherits(a, c("try-error", "response"))) skip("Server issues")
 	expect_true(a == "rs234")
 })
+
+test_that("ld_clump breaks tied p-values using beta and se (#39)", {
+	fto <- try(tophits("ieu-a-2", pval=1e-30, clump=0))
+	if (inherits(fto, c("try-error", "response"))) skip("Server issues")
+	fto <- subset(fto, chr == "16")
+	# se is rounded, so |beta/se| does not rank exactly as p does
+	lead <- fto$rsid[which.max(abs(fto$beta / fto$se))]
+	fto$pval <- 0
+	expect_no_warning(res <- try(ld_clump(dplyr::select(fto, rsid, pval, beta, se))))
+	if (inherits(res, c("try-error", "response"))) skip("Server issues")
+	expect_equal(res$rsid, lead)
+	expect_equal(res$pval, 0)
+})

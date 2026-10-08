@@ -3,10 +3,11 @@ skip_on_os("windows")
 
 # clump: what the fake plink does for --clump
 #   "ok": write a .clumped file containing the first variant
+#   "min": write a .clumped file containing the variant with the smallest P
 #   "none": log plink's no significant results warning and write no .clumped file
 #   "fail": log an error and exit with status 1
 # Each call appends its --out path to the file in attr(exe, "outs")
-fake_plink <- function(bim_lines=character(0), clump=c("ok", "none", "fail")) {
+fake_plink <- function(bim_lines=character(0), clump=c("ok", "min", "none", "fail")) {
 	clump <- match.arg(clump)
 	bim <- tempfile(fileext=".bim")
 	writeLines(bim_lines, bim)
@@ -29,6 +30,7 @@ fake_plink <- function(bim_lines=character(0), clump=c("ok", "none", "fail")) {
 		"if [ \"$mode\" = clump ]; then",
 		switch(clump,
 			ok = "  printf ' CHR F SNP BP P TOTAL NSIG S05 S01 S001 S0001 SP2\\n 1 1 %s 1 1e-10 0 0 0 0 0 0 NONE\\n' \"$(sed -n 2p \"$infile\" | cut -d' ' -f1)\" > \"$out.clumped\"",
+			min = "  printf ' CHR F SNP BP P TOTAL NSIG S05 S01 S001 S0001 SP2\\n 1 1 %s 1 1e-10 0 0 0 0 0 0 NONE\\n' \"$(tail -n +2 \"$infile\" | sort -g -k2,2 | head -n 1 | cut -d' ' -f1)\" > \"$out.clumped\"",
 			none = "  echo 'Warning: No significant --clump results.  Skipping.' > \"$out.log\"",
 			fail = "  echo 'Error: Failed to open fake.bed.' > \"$out.log\"; exit 1"
 		),
@@ -102,17 +104,24 @@ test_that("ld_clump_local and ld_matrix_local remove their temporary files", {
 	expect_length(list.files(tmpdir), 0)
 })
 
-test_that("ld_clump warns when the smallest p-value is tied (#39)", {
+test_that("ld_clump warns when the smallest p-value is tied and there is no beta and se (#39)", {
 	plink <- fake_plink()
 	tied <- data.frame(rsid=c("rs1", "rs2", "rs3"), pval=c(0, 0, 1e-8))
 	expect_warning(
 		expect_message(ld_clump(tied, bfile="fake", plink_bin=plink)),
-		"2 variants for .* share the smallest p-value \\(0\\)"
+		"2 variants for .* share the smallest p-value \\(0\\).*Include beta and se"
 	)
 	tied$pval <- c(1e-200, 1e-200, 1e-8)
 	expect_warning(
 		expect_message(ld_clump(tied, bfile="fake", plink_bin=plink)),
 		"share the smallest p-value \\(1e-200\\)"
+	)
+	# Also warn if beta and se cannot break the tie
+	tied$beta <- c(1, 1, 0.1)
+	tied$se <- 0.01
+	expect_warning(
+		expect_message(ld_clump(tied, bfile="fake", plink_bin=plink)),
+		"also tied"
 	)
 })
 
@@ -122,4 +131,34 @@ test_that("ld_clump does not warn about ties that do not matter (#39)", {
 	# Ties above clump_p cannot be lead variants
 	tied <- data.frame(rsid=c("rs1", "rs2", "rs3"), pval=c(0.5, 0.5, 0.6))
 	expect_no_warning(expect_message(ld_clump(tied, clump_p=0.1, bfile="fake", plink_bin=plink)))
+	# Ties broken by beta and se, even if lesser |beta/se| values are tied or missing
+	tied <- data.frame(rsid=c("rs1", "rs2", "rs3", "rs4"), pval=0, beta=c(1, 1, 2, NA), se=0.01)
+	expect_no_warning(expect_message(ld_clump(tied, bfile="fake", plink_bin=plink)))
+})
+
+test_that("break_pval_ties orders tied p-values by |beta/se| (#39)", {
+	d <- data.frame(
+		pval=c(0, 0, 0, 1e-300, 1e-300, 1e-8, 0.5, 0.5, NA),
+		beta=c(1, -3, 2, 1, 2, 1, 1, 2, 1),
+		se=1
+	)
+	p <- break_pval_ties(d, clump_p=0.1, id="x")
+	# Ties at 0 ordered by |z|: rs2 (3), rs3 (2), rs1 (1), all positive and below 1e-300
+	expect_true(p[2] < p[3] && p[3] < p[1])
+	expect_true(all(p[1:3] > 0 & p[1:3] < 1e-300))
+	# Ties at 1e-300 spread out at or below 1e-300, keeping order with other values
+	expect_true(p[5] < p[4] && p[4] <= 1e-300 && max(p[1:3]) < p[5])
+	# Untied values, ties above clump_p and NAs unchanged
+	expect_equal(p[6:9], d$pval[6:9])
+	# Without beta and se nothing changes
+	expect_warning(p2 <- break_pval_ties(d["pval"], clump_p=0.1, id="x"), "share the smallest")
+	expect_equal(p2, d$pval)
+})
+
+test_that("ld_clump keeps the variant with the largest |beta/se| among tied p-values and returns original rows (#39)", {
+	plink <- fake_plink(clump="min")
+	tied <- data.frame(rsid=c("rs1", "rs2", "rs3"), pval=c(0, 0, 0), beta=c(1, 3, 2), se=0.01)
+	expect_message(res <- ld_clump(tied, bfile="fake", plink_bin=plink))
+	expect_equal(res$rsid, "rs2")
+	expect_equal(res$pval, 0)
 })

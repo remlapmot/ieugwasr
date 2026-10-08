@@ -19,7 +19,8 @@ ld_clump(
 }
 \arguments{
 \item{dat}{Dataframe. Must have a variant name column (\code{rsid}) and pval column called \code{pval}.
-If \code{id} is present then clumping will be done per unique id.}
+If \code{id} is present then clumping will be done per unique id.
+If \code{beta} and \code{se} are present they are used to break ties in \code{pval}.}
 
 \item{clump_kb}{Clumping kb window. Default is very strict, \code{10000}}
 
@@ -65,4 +66,12 @@ This function does put load on the OpenGWAS servers, which makes life more
 difficult for other users. We have implemented a method and made available
 the LD reference panels to perform clumping locally, see
 \code{\link[=ld_clump]{ld_clump()}} and related vignettes for details.
+
+p-values smaller than about 1e-308 cannot be represented in R and underflow
+to 0, and other software may cap small p-values (e.g. at 1e-200), so several
+variants can share the smallest p-value. The lead variant among them would
+then be chosen arbitrarily. If \code{dat} has \code{beta} and \code{se} columns, tied
+p-values are broken by |\code{beta}/\code{se}| before clumping, so that the variant
+with the strongest association is retained. The returned rows are unchanged.
+Otherwise a warning is given if the smallest p-value is tied.
 }
